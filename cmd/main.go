@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 )
 
 func main() {
-	loggerConfig()
 
 	startURL := os.Getenv("START_PAGE")
 	finalURL := os.Getenv("FINAL_PAGE")
@@ -50,22 +48,6 @@ func main() {
 	wg.Wait()
 	fmt.Println("All tests completed")
 
-}
-
-func loggerConfig() {
-	level := slog.LevelInfo
-	err := level.UnmarshalText([]byte("INFO"))
-	if err != nil {
-		slog.Info("Undefined log level")
-	}
-
-	// параметры обработчика логов
-	opts := &slog.HandlerOptions{
-		Level: level,
-	}
-	handler := slog.NewJSONHandler(os.Stdout, opts)
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
 }
 
 // getTimeLimit возвращает интервал времени между запросами для ограничения RPS
