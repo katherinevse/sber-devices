@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"os"
 	"sber-devices/internal/client"
 	"sber-devices/internal/logger"
 	"sber-devices/internal/test_runner"
@@ -18,12 +19,12 @@ func main() {
 	baseURL := "http://193.168.227.93"
 	finalURL := "http://193.168.227.93/passed"
 
-	qtyOfThreads, err := strconv.Atoi("5")
+	qtyOfThreads, err := strconv.Atoi(os.Getenv("QTY_THREADS"))
 	if err != nil {
 		log.Fatalf("Failed to parse quantity of threads: %s\n", "5")
 	}
 
-	maxRPS, err := strconv.Atoi("3")
+	maxRPS, err := strconv.Atoi(os.Getenv("MAX_RPS"))
 	if err != nil {
 		log.Fatalf("Failed to parse RPS parameter: %s\n", "3")
 	}
