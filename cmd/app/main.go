@@ -16,10 +16,10 @@ import (
 func main() {
 	logger.Configure()
 
-	baseURL := "http://193.168.227.93"
-	finalURL := "http://193.168.227.93/passed"
+	baseURL := os.Getenv("BASE_URL")
+	finalURL := os.Getenv("FINAL_URL")
 
-	qtyOfThreads, err := strconv.Atoi(os.Getenv("QTY_THREADS"))
+	qtyOfThreads, err := strconv.Atoi(os.Getenv("QTY_THREAD"))
 	if err != nil {
 		log.Fatalf("Failed to parse quantity of threads: %s\n", "5")
 	}

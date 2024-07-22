@@ -7,7 +7,7 @@ import (
 
 func Configure() {
 	level := slog.LevelInfo
-	err := level.UnmarshalText([]byte("INFO"))
+	err := level.UnmarshalText([]byte(os.Getenv("LOG")))
 	if err != nil {
 		// TODO return error
 		slog.Info("Undefined log level")
