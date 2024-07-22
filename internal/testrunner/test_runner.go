@@ -3,41 +3,60 @@ package testrunner
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"sber-devices/internal/form"
 	"strings"
+	"sync"
 	"time"
 )
 
 // TODO добавить горутины  тесты.
 // TODO удалить зависимости с клиентом
 
-func RunTests(startURL, finalURL string, limiter <-chan time.Time) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		log.Fatalf("Failed to create cookie jar: %v", err)
-	}
+func Runner(qtyOfThreads int, baseURL string, finalURL string, limiter <-chan time.Time) {
+	wg := sync.WaitGroup{}
+	wg.Add(qtyOfThreads)
 
-	//TODO удалить зависимости с клиентом
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse //откл редиректами
-		},
-		Jar: jar,
-	}
+	successRate := 0
+	var successRateMutex sync.Mutex
 
-	err = Runner(client, startURL, finalURL, limiter)
-	if err != nil {
-		log.Printf("Client failed: %v", err)
-	} else {
-		log.Println("Client successfully completed the test")
+	slog.Info("Test runner is working")
+	for i := 0; i < qtyOfThreads; i++ {
+		go func(n int) {
+			defer wg.Done()
+
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				log.Fatalf("Failed to create cookie jar: %v", err)
+			}
+
+			client := &http.Client{
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					return http.ErrUseLastResponse // отключить редиректы
+				},
+				Jar: jar,
+			}
+
+			err = RunTests(client, baseURL, finalURL, limiter)
+			if err == nil {
+				slog.Info(fmt.Sprintf("Process #%d: Test successfully passed", n))
+				successRateMutex.Lock()
+				successRate++
+				successRateMutex.Unlock()
+			} else {
+				log.Printf("Process #%d: Test failed with error: %v", n, err)
+			}
+		}(i)
 	}
+	wg.Wait()
+	log.Printf("Successfully passed %d tests of %d\n", successRate, qtyOfThreads)
 }
 
 // Runner выполняет тест переходя от вопроса к вопросу.
-func Runner(client *http.Client, baseURL string, finalURL string, limiter <-chan time.Time) error {
+func RunTests(client *http.Client, baseURL string, finalURL string, limiter <-chan time.Time) error {
 	currentURL, sid, err := navigateToQuestionPage(client, baseURL, limiter)
 	if err != nil {
 		return err

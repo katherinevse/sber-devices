@@ -16,13 +16,13 @@ import (
 func main() {
 	loggerConfig()
 
-	firstURL := "http://193.168.227.93"
+	baseURL := "http://193.168.227.93"
 	finalURL := "http://193.168.227.93/passed"
 
-	//qtyOfThreads, err := strconv.Atoi("5")
-	//if err != nil {
-	//	log.Fatalf("Failed to parse quantity of threads: %s\n", "5")
-	//}
+	qtyOfThreads, err := strconv.Atoi("5")
+	if err != nil {
+		log.Fatalf("Failed to parse quantity of threads: %s\n", "5")
+	}
 
 	maxRPS, err := strconv.Atoi("3")
 	if err != nil {
@@ -30,7 +30,7 @@ func main() {
 	}
 	limiter := time.Tick(getTimeLimit(maxRPS))
 
-	testrunner.RunTests(firstURL, finalURL, limiter)
+	testrunner.Runner(qtyOfThreads, baseURL, finalURL, limiter)
 }
 
 func getTimeLimit(rps int) time.Duration {
