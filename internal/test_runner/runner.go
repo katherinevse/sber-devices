@@ -1,97 +1,64 @@
-package testrunner
+package test_runner
 
 import (
 	"fmt"
 	"log"
-	"log/slog"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
-	"sber-devices/internal/form"
 	"strings"
-	"sync"
 	"time"
 )
 
-// TODO добавить горутины  тесты.
-// TODO удалить зависимости с клиентом
-
-func Runner(qtyOfThreads int, baseURL string, finalURL string, limiter <-chan time.Time) {
-	wg := sync.WaitGroup{}
-	wg.Add(qtyOfThreads)
-
-	successRate := 0
-	var successRateMutex sync.Mutex
-
-	slog.Info("Test runner is working")
-	for i := 0; i < qtyOfThreads; i++ {
-		go func(n int) {
-			defer wg.Done()
-
-			jar, err := cookiejar.New(nil)
-			if err != nil {
-				log.Fatalf("Failed to create cookie jar: %v", err)
-			}
-
-			client := &http.Client{
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					return http.ErrUseLastResponse // отключить редиректы
-				},
-				Jar: jar,
-			}
-
-			err = RunTests(client, baseURL, finalURL, limiter)
-			if err == nil {
-				slog.Info(fmt.Sprintf("Process #%d: Test successfully passed", n))
-				successRateMutex.Lock()
-				successRate++
-				successRateMutex.Unlock()
-			} else {
-				log.Printf("Process #%d: Test failed with error: %v", n, err)
-			}
-		}(i)
-	}
-	wg.Wait()
-	log.Printf("Successfully passed %d tests of %d\n", successRate, qtyOfThreads)
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+	SetCookies(u *url.URL, cookies []*http.Cookie)
+	Cookies(u *url.URL) []*http.Cookie
 }
 
-// Runner выполняет тест переходя от вопроса к вопросу.
-func RunTests(client *http.Client, baseURL string, finalURL string, limiter <-chan time.Time) error {
-	currentURL, sid, err := navigateToQuestionPage(client, baseURL, limiter)
+type TestRunner struct {
+	client   HTTPClient
+	baseURL  string
+	finalURL string
+	limiter  <-chan time.Time
+}
+
+// NewTestRunner создает новый экземпляр testRunner.
+func NewTestRunner(client HTTPClient, baseURL, finalURL string, limiter <-chan time.Time) *TestRunner {
+	return &TestRunner{
+		client:   client,
+		baseURL:  baseURL,
+		finalURL: finalURL,
+		limiter:  limiter,
+	}
+}
+
+// RunTests выполняет тесты, переходя от вопроса к вопросу.
+func (tr *TestRunner) RunTests() error {
+	currentURL, sid, err := tr.navigateToQuestionPage()
 	if err != nil {
 		return err
 	}
 
 	for {
-		<-limiter
+		<-tr.limiter
 
-		resp, err := fetchPageWithSid(client, currentURL, sid, limiter)
+		resp, err := tr.fetchPageWithSid(currentURL, sid)
 		if err != nil {
 			return err
 		}
 		defer resp.Body.Close()
 
-		if resp.Request.URL.String() == finalURL {
+		if resp.Request.URL.String() == tr.finalURL {
 			log.Println("All tests completed")
 			break
 		}
 
-		//// TODO del me ------------------------------------------------------
-		//b, err := io.ReadAll(resp.Body)
-		//if err != nil {
-		//	return err
-		//}
-		//fmt.Println(string(b))
-		//// TODO del me ------------------------------------------------------
-
-		// Обработка текущей страницы
-		formData, err := form.ParseFormData(resp.Body)
+		formData, err := ParseFormData(resp.Body)
 		if err != nil {
 			return fmt.Errorf("error parsing question page: %v", err)
 		}
 
-		// Отправка формы и получение ответа
-		resp, location, err := submitForm(client, currentURL, formData, sid, limiter)
+		resp, location, err := tr.submitForm(currentURL, formData, sid)
 		if err != nil {
 			return err
 		}
@@ -103,8 +70,7 @@ func RunTests(client *http.Client, baseURL string, finalURL string, limiter <-ch
 			log.Printf("POST request failed with status code: %d", resp.StatusCode)
 		}
 
-		//nextURL
-		currentURL = baseURL + location
+		currentURL = tr.baseURL + location
 	}
 
 	log.Println("Test successfully completed")
@@ -112,8 +78,8 @@ func RunTests(client *http.Client, baseURL string, finalURL string, limiter <-ch
 }
 
 // fetchPageWithSid выполняет GET запрос с cookie sid.
-func fetchPageWithSid(client *http.Client, url, sid string, limiter <-chan time.Time) (*http.Response, error) {
-	<-limiter
+func (tr *TestRunner) fetchPageWithSid(url, sid string) (*http.Response, error) {
+	<-tr.limiter
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating GET request: %v", err)
@@ -122,7 +88,7 @@ func fetchPageWithSid(client *http.Client, url, sid string, limiter <-chan time.
 		req.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	}
 
-	resp, err := client.Do(req)
+	resp, err := tr.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("error getting question page: %v", err)
 	}
@@ -136,8 +102,8 @@ func fetchPageWithSid(client *http.Client, url, sid string, limiter <-chan time.
 }
 
 // submitForm выполняет POST запрос с формой.
-func submitForm(client *http.Client, url string, formData url.Values, sid string, limiter <-chan time.Time) (*http.Response, string, error) {
-	<-limiter
+func (tr *TestRunner) submitForm(url string, formData url.Values, sid string) (*http.Response, string, error) {
+	<-tr.limiter
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(formData.Encode()))
 	if err != nil {
@@ -148,9 +114,9 @@ func submitForm(client *http.Client, url string, formData url.Values, sid string
 		req.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	}
 
-	resp, err := client.Do(req)
+	resp, err := tr.client.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("error sending form: %v", err)
+		return nil, "", fmt.Errorf("error sending test_runner: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -167,16 +133,16 @@ func submitForm(client *http.Client, url string, formData url.Values, sid string
 }
 
 // navigateToQuestionPage navigates to the question page and extracts the sid.
-func navigateToQuestionPage(client *http.Client, baseURL string, limiter <-chan time.Time) (string, string, error) {
-	<-limiter
-	startURL := baseURL + "/start"
+func (tr *TestRunner) navigateToQuestionPage() (string, string, error) {
+	<-tr.limiter
+	startURL := tr.baseURL + "/start"
 
 	req, err := http.NewRequest("GET", startURL, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("error creating request to 'Start': %v", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := tr.client.Do(req)
 	if err != nil {
 		return "", "", fmt.Errorf("error pressing 'Start' button: %v", err)
 	}
@@ -186,7 +152,7 @@ func navigateToQuestionPage(client *http.Client, baseURL string, limiter <-chan 
 		return "", "", fmt.Errorf("expected status 302, but got %d", resp.StatusCode)
 	}
 
-	if err := extractAndSaveCookies(resp, client); err != nil {
+	if err := tr.extractAndSaveCookies(resp); err != nil {
 		return "", "", fmt.Errorf("error extracting cookies after 'Start': %v", err)
 	}
 
@@ -197,7 +163,7 @@ func navigateToQuestionPage(client *http.Client, baseURL string, limiter <-chan 
 
 	// Extract sid from cookies
 	sid := ""
-	for _, cookie := range client.Jar.Cookies(resp.Request.URL) {
+	for _, cookie := range tr.client.Cookies(resp.Request.URL) {
 		if cookie.Name == "sid" {
 			sid = cookie.Value
 			break
@@ -207,18 +173,18 @@ func navigateToQuestionPage(client *http.Client, baseURL string, limiter <-chan 
 		return "", "", fmt.Errorf("failed to get sid from cookies")
 	}
 
-	currentURL := baseURL + location
+	currentURL := tr.baseURL + location
 	return currentURL, sid, nil
 }
 
 // extractAndSaveCookies сохраняет cookies из ответа.
-func extractAndSaveCookies(resp *http.Response, client *http.Client) error {
+func (tr *TestRunner) extractAndSaveCookies(resp *http.Response) error {
 	cookies := resp.Cookies()
 	u, err := url.Parse(resp.Request.URL.String())
 	if err != nil {
 		return fmt.Errorf("error parsing URL: %v", err)
 	}
-	client.Jar.SetCookies(u, cookies)
+	tr.client.SetCookies(u, cookies)
 
 	return nil
 }
